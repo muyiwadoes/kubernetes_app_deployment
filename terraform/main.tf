@@ -600,6 +600,11 @@ resource "helm_release" "aws_load_balancer_controller" {
 # NOTE: this role previously existed outside Terraform state (created by
 # an "oidc-bootstrap" step) and I imported it manually into Terraform state with:
 # terraform import aws_iam_role.github_actions GitHubActionsDeployRole-execute-techacademy
+locals {
+  github_owner = split("/", var.github_repo)[0]
+  github_name  = split("/", var.github_repo)[1]
+}
+
 resource "aws_iam_role" "github_actions" {
   name = "GitHubActionsDeployRole-${var.project_name}"
 
@@ -618,9 +623,14 @@ resource "aws_iam_role" "github_actions" {
           }
           StringLike = {
             "token.actions.githubusercontent.com:sub" = [
+              # legacy (mutable) format
               "repo:${var.github_repo}:ref:refs/heads/temp",
               "repo:${var.github_repo}:ref:refs/heads/main",
-              "repo:${var.github_repo}:pull_request"
+              "repo:${var.github_repo}:pull_request",
+              # immutable format: owner@ownerId/repo@repoId
+              "repo:${local.github_owner}@*/${local.github_name}@*:ref:refs/heads/temp",
+              "repo:${local.github_owner}@*/${local.github_name}@*:ref:refs/heads/main",
+              "repo:${local.github_owner}@*/${local.github_name}@*:pull_request",
             ]
           }
         }
