@@ -263,6 +263,31 @@ resource "aws_iam_role" "ecs_task" {
   })
 }
 
+# ECS Exec requires the TASK role (not the execution role) to be able to
+# open the SSM data/control channels. AmazonSSMManagedInstanceCore is the
+# usual shortcut here, but it's an EC2-instance-shaped policy with far
+# more permissions than a task needs. Per the project brief's
+# least-privilege requirement, scope this to exactly the four
+# ssmmessages actions ECS Exec actually calls.
+resource "aws_iam_role_policy" "ecs_task_exec" {
+  name = "ECSExecSSMMessages-${var.project_name}"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "ssmmessages:CreateControlChannel",
+        "ssmmessages:CreateDataChannel",
+        "ssmmessages:OpenControlChannel",
+        "ssmmessages:OpenDataChannel"
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
 # IAM - EXTERNAL SECRETS OPERATOR (IRSA)
 resource "aws_iam_role" "external_secrets" {
   name = "ExternalSecretsRole-${var.project_name}"
@@ -404,6 +429,9 @@ resource "aws_ecs_service" "frontend" {
   task_definition = aws_ecs_task_definition.frontend.arn
   desired_count   = 2
   launch_type     = "FARGATE"
+
+  # Enables `aws ecs execute-command` (ECS Exec) against running tasks.
+  enable_execute_command = true
 
   network_configuration {
     subnets          = module.vpc.private_subnets

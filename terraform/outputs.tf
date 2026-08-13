@@ -86,3 +86,8 @@ output "external_secrets_role_arn" {
   description = "IAM role ARN used by External Secrets Operator"
   value       = aws_iam_role.external_secrets.arn
 }
+
+output "api_url" {
+  description = "REACT_APP_API_URL"
+  value = "http://${aws_lb.main.dns_name}"
+}
