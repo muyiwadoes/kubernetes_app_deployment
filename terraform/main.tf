@@ -470,8 +470,8 @@ module "eks" {
 
   eks_managed_node_groups = {
     workers = {
-      name           = "workers"
-      instance_types = [var.eks_node_instance_type]
+      name               = "workers"
+      instance_types     = [var.eks_node_instance_type]
       kubernetes_version = var.eks_kubernetes_version
 
       min_size     = var.eks_node_count
