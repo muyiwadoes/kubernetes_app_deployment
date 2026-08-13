@@ -672,14 +672,25 @@ resource "aws_iam_role_policy" "github_actions" {
           "iam:*",
           "secretsmanager:*",
           "kms:*",
-          "ssm:GetParameter",
-          "ssm:GetParameters",
           "sts:GetCallerIdentity",
           "sts:AssumeRole",
           "sts:TagSession"
         ]
 
         Resource = "*"
+      },
+
+      # SSM read access for EKS-managed AMI parameter lookups (public AWS-owned parameters)
+      {
+        Sid    = "SSMReadOnly"
+        Effect = "Allow"
+
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters"
+        ]
+
+        Resource = "arn:aws:ssm:*::parameter/aws/service/eks/*"
       },
 
       # Terraform remote state - bucket metadata and state access
