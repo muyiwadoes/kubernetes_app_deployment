@@ -611,20 +611,21 @@ resource "aws_iam_role" "github_actions" {
     Project = var.project_name
   }
 }
-
+# IAM - GITHUB ACTIONS DEPLOYMENT ROLE POLICY
 resource "aws_iam_role_policy" "github_actions" {
   name = "GitHubActionsDeploy-${var.project_name}"
-  role = aws_iam_role.github_actions.name
+  role = data.aws_iam_role.github_actions.name
 
   policy = jsonencode({
     Version = "2012-10-17"
+
     Statement = [
-      # Broad permissions needed by Terraform itself, plus s3/dynamodb
-      # for the remote state backend (bucket + lock table) that
-      # `terraform init` needs on every plan/apply run.
+
+      # Terraform infrastructure permissions
       {
-        Sid    = "TerraformFullAccess"
+        Sid    = "TerraformInfrastructure"
         Effect = "Allow"
+
         Action = [
           "ec2:*",
           "eks:*",
@@ -636,20 +637,64 @@ resource "aws_iam_role_policy" "github_actions" {
           "iam:*",
           "secretsmanager:*",
           "kms:*",
-          "s3:*",
-          "dynamodb:*",
           "sts:GetCallerIdentity",
           "sts:AssumeRole",
           "sts:TagSession"
         ]
+
         Resource = "*"
       },
 
-      # Explicit PassRole required by ECS & EKS
+      # Terraform remote state - bucket metadata and state access
+      {
+        Sid    = "TerraformStateBucket"
+        Effect = "Allow"
+
+        Action = [
+          "s3:GetBucketVersioning",
+          "s3:ListBucket",
+          "s3:GetBucketLocation"
+        ]
+
+        Resource = "arn:aws:s3:::execute-techacademy-tfstate"
+      },
+
+      # Terraform remote state - state object access
+      {
+        Sid    = "TerraformStateObjects"
+        Effect = "Allow"
+
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+
+        Resource = "arn:aws:s3:::execute-techacademy-tfstate/execute-techacademy/terraform.tfstate"
+      },
+
+      # Terraform state locking
+      {
+        Sid    = "TerraformStateLock"
+        Effect = "Allow"
+
+        Action = [
+          "dynamodb:DescribeTable",
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem"
+        ]
+
+        Resource = "arn:aws:dynamodb:eu-north-1:390445022869:table/execute-techacademy-tflock"
+      },
+
+      # Explicit PassRole required by ECS and EKS
       {
         Sid    = "PassRoles"
         Effect = "Allow"
+
         Action = "iam:PassRole"
+
         Resource = [
           aws_iam_role.ecs_execution.arn,
           aws_iam_role.ecs_task.arn,
