@@ -24,8 +24,12 @@ resource "aws_iam_role" "github_actions" {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
           }
+          # Support BOTH the classic and the new immutable sub claim formats
           StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:*"
+            "token.actions.githubusercontent.com:sub" = [
+              "repo:${var.github_repo}:*",          # classic: repo:org/repo:ref:...
+              "repo:${var.github_repo}@*:*"         # immutable: repo:org@ID/repo@ID:ref:...
+            ]
           }
         }
       }
