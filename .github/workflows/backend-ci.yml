@@ -7,6 +7,7 @@ on:
       - 'backend/**'
       - 'kubernetes/**'
       - '.github/workflows/backend-ci.yml'
+      
   workflow_run:
     workflows: ["Terraform Infrastructure"]
     types: [completed]

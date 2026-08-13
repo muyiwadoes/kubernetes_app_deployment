@@ -87,6 +87,13 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
+      - name: Debug GitHub OIDC Context
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Ref: $GITHUB_REF"
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Actor: $GITHUB_ACTOR"
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -141,5 +148,5 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -input=false -auto-approve tfplan
 
-      - name: Terraform Output
+      - name: Print all Terraform outputs
         run: terraform output

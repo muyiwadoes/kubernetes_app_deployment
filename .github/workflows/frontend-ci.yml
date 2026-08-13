@@ -17,6 +17,10 @@ on:
       - 'nginx.conf'
       - '.github/workflows/frontend-ci.yml'
 
+  workflow_run:
+    workflows: ["Terraform Infrastructure"]
+    types: [completed]
+
   workflow_dispatch:
     inputs:
       commit_sha:
@@ -66,16 +70,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get ALB DNS name
+        id: alb
+        run: |
+          DNS=$(aws elbv2 describe-load-balancers \
+            --names alb-execute-techacademy \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+          echo "url=http://$DNS" >> "$GITHUB_OUTPUT"
+
       - name: Build Image
         run: |
           docker build \
-            --build-arg REACT_APP_API_URL="${{ vars.REACT_APP_API_URL }}" \
+            --build-arg REACT_APP_API_URL="${{ steps.alb.outputs.url }}" \
             -t frontend-execute-techacademy:${{ github.sha }} \
             .
 
       - name: Save Image
         run: |
-          docker save frontend-execute-techacademy:${{ github.sha }} | gzip > image.tar.gz
+          docker save frontend-execute-techacademy:${{ github.sha }}
 
       - uses: actions/upload-artifact@v4
         with:

@@ -89,5 +89,5 @@ output "external_secrets_role_arn" {
 
 output "api_url" {
   description = "REACT_APP_API_URL"
-  value = "http://${aws_lb.main.dns_name}"
+  value       = "http://${aws_lb.main.dns_name}"
 }
