@@ -37,9 +37,6 @@ env:
 jobs:
 
   # DETECT WHETHER BACKEND CODE ACTUALLY CHANGED
-  # workflow_run (Terraform-triggered) is always treated as "no backend
-  # change" — Terraform apply doesn't touch backend/, so a new image
-  # build here would be redundant.
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
@@ -99,7 +96,7 @@ jobs:
           name: backend-image
           path: image.tar.gz
 
-  # VALIDATE KUBERNETES MANIFESTS — always runs, cheap, independent of build
+  # VALIDATE KUBERNETES MANIFESTS — fully offline with kubeconform
   kubernetes:
     name: Validate Kubernetes Manifests
     runs-on: ubuntu-latest
@@ -110,24 +107,21 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Install kubectl
+      - name: Install kubeconform
         run: |
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/kubectl
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz
+          sudo mv kubeconform /usr/local/bin/
+          kubeconform -v
 
-      - name: Validate Namespace Manifest
+      - name: Validate Kubernetes Manifests
         run: |
-          KUBECONFIG=/dev/null kubectl apply --dry-run=client --validate=false -f kubernetes/namespace.yml
+          # Static manifests
+          kubeconform -summary -strict kubernetes/namespace.yml
+          kubeconform -summary -strict kubernetes/services.yml
 
-      - name: Validate Deployment Manifest
-        run: |
+          # Deployment (replace image placeholder first)
           sed 's|<IMAGE_URI>|placeholder:validate|g' kubernetes/deployment.yml \
-            | KUBECONFIG=/dev/null kubectl apply --dry-run=client --validate=false -f -
-
-      - name: Validate Service Manifest
-        run: |
-          KUBECONFIG=/dev/null kubectl apply --dry-run=client --validate=false -f kubernetes/services.yml
+            | kubeconform -summary -strict -
 
   # TRIVY IMAGE SCAN — only if a new image was built
   trivy:
@@ -146,7 +140,7 @@ jobs:
         run: gunzip -c image.tar.gz | docker load
 
       - name: Scan Image
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: backend-execute-techacademy:${{ github.sha }}
           severity: HIGH,CRITICAL
@@ -200,9 +194,7 @@ jobs:
         run: |
           echo "uri=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
-  # DEPLOY TO EKS — runs whenever kubernetes/ manifests, backend code,
-  # or Terraform infra changed. Resolves the image to deploy: newly
-  # pushed image if one exists, otherwise whatever is already running.
+  # DEPLOY TO EKS
   deploy:
     name: Deploy to EKS
     runs-on: ubuntu-latest
