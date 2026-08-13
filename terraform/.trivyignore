@@ -1,0 +1,19 @@
+# Intentionally public-facing ALB for the frontend
+AWS-0053
+
+# Unrestricted egress is common & intentional for these security groups
+# (image pulls, package updates, external APIs, DNS, etc.)
+AWS-0104
+
+# HTTP listener – will be upgraded to HTTPS + ACM later when domain is ready
+AWS-0054
+
+# EKS public endpoint – acceptable for this project stage
+# (will lock down to specific CIDRs or switch to private later)
+AWS-0040
+AWS-0041
+
+# S3 state bucket uses SSE-S3 (AES256) instead of a customer-managed KMS key
+# for simplicity at this project stage; revisit if CMK rotation/auditability
+# becomes a requirement
+AWS-0132

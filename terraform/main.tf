@@ -163,6 +163,8 @@ resource "aws_db_instance" "postgres" {
   max_allocated_storage = 50
   storage_type          = "gp3"
 
+  storage_encrypted = true
+
   db_name  = var.rds_db_name
   username = var.rds_username
 
@@ -189,6 +191,8 @@ resource "aws_lb" "main" {
 
   subnets         = module.vpc.public_subnets
   security_groups = [aws_security_group.alb.id]
+
+  drop_invalid_header_fields = true
 
   tags = {
     Project = var.project_name
