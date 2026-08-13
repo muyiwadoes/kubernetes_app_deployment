@@ -672,10 +672,12 @@ resource "aws_iam_role_policy" "github_actions" {
           "iam:*",
           "secretsmanager:*",
           "kms:*",
+          "ssm:GetParameter",
+          "ssm:GetParameters",
           "sts:GetCallerIdentity",
           "sts:AssumeRole",
           "sts:TagSession"
-        ]
+      ]
 
         Resource = "*"
       },
