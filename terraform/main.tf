@@ -677,7 +677,7 @@ resource "aws_iam_role_policy" "github_actions" {
           "sts:GetCallerIdentity",
           "sts:AssumeRole",
           "sts:TagSession"
-      ]
+        ]
 
         Resource = "*"
       },
