@@ -569,18 +569,8 @@ resource "helm_release" "aws_load_balancer_controller" {
 
 # GITHUB ACTIONS OIDC ROLE
 # NOTE: this role previously existed outside Terraform state (created by
-# an "oidc-bootstrap" step) and was only referenced via a data source.
-# Its trust policy (assume_role_policy) was therefore never managed here,
-# which is why the GitHub Actions workflow was getting
-# "Not authorized to perform sts:AssumeRoleWithWebIdentity" — the trust
-# policy attached to the role in AWS did not allow the branch/ref the
-# workflow was running on (refs/heads/temp).
-#
-# It is now a first-class resource with an explicit trust policy that
-# uses StringLike + a wildcard "sub", so any ref/branch/tag on this repo
-# can assume the role. If this role already exists in AWS, import it
-# before applying:
-#   terraform import aws_iam_role.github_actions GitHubActionsDeployRole-execute-techacademy
+# an "oidc-bootstrap" step) and I imported it manually into Terraform state with:
+# terraform import aws_iam_role.github_actions GitHubActionsDeployRole-execute-techacademy
 resource "aws_iam_role" "github_actions" {
   name = "GitHubActionsDeployRole-${var.project_name}"
 
@@ -612,6 +602,10 @@ resource "aws_iam_role" "github_actions" {
   }
 }
 # IAM - GITHUB ACTIONS DEPLOYMENT ROLE POLICY
+data "aws_iam_role" "github_actions" {
+  name = "GitHubActionsDeployRole-${var.project_name}"
+}
+
 resource "aws_iam_role_policy" "github_actions" {
   name = "GitHubActionsDeploy-${var.project_name}"
   role = data.aws_iam_role.github_actions.name
