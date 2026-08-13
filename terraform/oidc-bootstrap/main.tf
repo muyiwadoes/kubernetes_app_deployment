@@ -3,7 +3,7 @@ resource "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 
   client_id_list = [
-    "sts.amazonaws.com"
+    "sts.amazonaws.com",
   ]
 }
 
@@ -24,15 +24,14 @@ resource "aws_iam_role" "github_actions" {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
           }
-          # Support BOTH the classic and the new immutable sub claim formats
           StringLike = {
             "token.actions.githubusercontent.com:sub" = [
-              "repo:${var.github_repo}:*",          # classic: repo:org/repo:ref:...
-              "repo:${var.github_repo}@*:*"         # immutable: repo:org@ID/repo@ID:ref:...
+              "repo:${var.github_repo}:*",
+              "repo:${var.github_repo}@*:*",
             ]
           }
         }
-      }
+      },
     ]
   })
 }
