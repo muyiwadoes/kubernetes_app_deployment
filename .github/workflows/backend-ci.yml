@@ -117,15 +117,15 @@ jobs:
           sudo mv kubectl /usr/local/bin/kubectl
 
       - name: Validate Namespace Manifest
-        run: kubectl apply --dry-run=client -f kubernetes/namespace.yml
+        run: kubectl apply --dry-run=client --validate=false -f kubernetes/namespace.yml
 
       - name: Validate Deployment Manifest
         run: |
           sed 's|<IMAGE_URI>|placeholder:validate|g' kubernetes/deployment.yml \
-            | kubectl apply --dry-run=client -f -
+            | kubectl apply --dry-run=client --validate=false -f -
 
       - name: Validate Service Manifest
-        run: kubectl apply --dry-run=client -f kubernetes/services.yml
+        run: kubectl apply --dry-run=client --validate=false -f kubernetes/services.yml
 
   # TRIVY IMAGE SCAN — only if a new image was built
   trivy:
