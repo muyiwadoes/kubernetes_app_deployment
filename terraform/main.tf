@@ -568,6 +568,7 @@ resource "helm_release" "aws_load_balancer_controller" {
 }
 
 # GITHUB ACTIONS OIDC ROLE
+
 # NOTE: this role previously existed outside Terraform state (created by
 # an "oidc-bootstrap" step) and I imported it manually into Terraform state with:
 # terraform import aws_iam_role.github_actions GitHubActionsDeployRole-execute-techacademy
@@ -589,7 +590,9 @@ resource "aws_iam_role" "github_actions" {
           }
           StringLike = {
             "token.actions.githubusercontent.com:sub" = [
-              "repo:muyiwadoes@37314825/kubernetes_app_deployment@1304867374:*"
+              "repo:${var.github_repo}:ref:refs/heads/temp",
+              "repo:${var.github_repo}:ref:refs/heads/main",
+              "repo:${var.github_repo}:pull_request"
             ]
           }
         }
