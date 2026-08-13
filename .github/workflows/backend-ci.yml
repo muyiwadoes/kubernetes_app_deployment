@@ -1,0 +1,380 @@
+name: CI - Backend to EKS
+
+on:
+  push:
+    branches: [main, temp]
+    paths:
+      - 'backend/**'
+      - 'kubernetes/**'
+      - '.github/workflows/backend-ci.yml'
+  workflow_run:
+    workflows: ["Terraform Infrastructure"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Commit SHA to rollback to"
+        required: true
+        type: string
+  pull_request:
+    branches: [main, temp]
+    paths:
+      - 'backend/**'
+      - 'kubernetes/**'
+      - '.github/workflows/backend-ci.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  ECR_REPOSITORY: backend-execute-techacademy
+  EKS_CLUSTER: eks-execute-techacademy
+  BACKEND_DEPLOYMENT: execute-techacademy
+  BACKEND_CONTAINER: execute-techacademy
+
+jobs:
+
+  # DETECT WHETHER BACKEND CODE ACTUALLY CHANGED
+  # workflow_run (Terraform-triggered) is always treated as "no backend
+  # change" — Terraform apply doesn't touch backend/, so a new image
+  # build here would be redundant.
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.decide.outputs.backend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        if: github.event_name != 'workflow_run'
+        uses: dorny/paths-filter@v3
+        id: paths
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+
+      - name: Decide whether backend changed
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=${{ steps.paths.outputs.backend }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # BUILD BACKEND IMAGE — only when backend/ actually changed
+  build:
+    name: Build Backend Image
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Build Image
+        run: |
+          docker build \
+            -t backend-execute-techacademy:${{ github.sha }} \
+            backend/
+
+      - name: Save Image
+        run: |
+          docker save backend-execute-techacademy:${{ github.sha }} | gzip > image.tar.gz
+
+      - name: Upload Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-image
+          path: image.tar.gz
+
+  # VALIDATE KUBERNETES MANIFESTS — always runs, cheap, independent of build
+  kubernetes:
+    name: Validate Kubernetes Manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+
+      - name: Validate Namespace Manifest
+        run: kubectl apply --dry-run=client -f kubernetes/namespace.yml
+
+      - name: Validate Deployment Manifest
+        run: |
+          sed 's|<IMAGE_URI>|placeholder:validate|g' kubernetes/deployment.yml \
+            | kubectl apply --dry-run=client -f -
+
+      - name: Validate Service Manifest
+        run: kubectl apply --dry-run=client -f kubernetes/services.yml
+
+  # TRIVY IMAGE SCAN — only if a new image was built
+  trivy:
+    name: Trivy Image Scan
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.result == 'success'
+
+    steps:
+      - name: Download Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+
+      - name: Load Image
+        run: gunzip -c image.tar.gz | docker load
+
+      - name: Scan Image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: backend-execute-techacademy:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+  # PUSH IMAGE TO ECR — only if a new image was built and scanned
+  push:
+    name: Push Image to ECR
+    runs-on: ubuntu-latest
+    needs: trivy
+    if: >
+      needs.trivy.result == 'success' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/temp')
+
+    outputs:
+      image: ${{ steps.image.outputs.uri }}
+
+    steps:
+      - name: Download Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+
+      - name: Load Image
+        run: gunzip -c image.tar.gz | docker load
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag Image
+        run: |
+          docker tag \
+            backend-execute-techacademy:${{ github.sha }} \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+      - name: Push Image
+        run: |
+          docker push \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+      - name: Set Image Output
+        id: image
+        run: |
+          echo "uri=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+  # DEPLOY TO EKS — runs whenever kubernetes/ manifests, backend code,
+  # or Terraform infra changed. Resolves the image to deploy: newly
+  # pushed image if one exists, otherwise whatever is already running.
+  deploy:
+    name: Deploy to EKS
+    runs-on: ubuntu-latest
+    needs: [changes, kubernetes, push]
+    if: |
+      always() &&
+      needs.kubernetes.result == 'success' &&
+      (needs.push.result == 'success' || needs.push.result == 'skipped') &&
+      github.event_name != 'pull_request' &&
+      (
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         (github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'temp')) ||
+        (github.event_name != 'workflow_run' &&
+         (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/temp'))
+      )
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.EKS_CLUSTER }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for External Secrets CRDs
+        run: |
+          kubectl wait --for=condition=Established \
+            crd/externalsecrets.external-secrets.io \
+            --timeout=120s
+          kubectl wait --for=condition=Established \
+            crd/clustersecretstores.external-secrets.io \
+            --timeout=120s
+
+      - name: Resolve Image To Deploy
+        id: resolve
+        run: |
+          if [ -n "${{ needs.push.outputs.image }}" ]; then
+            echo "image=${{ needs.push.outputs.image }}" >> "$GITHUB_OUTPUT"
+          else
+            CURRENT_IMAGE=$(kubectl get deployment ${{ env.BACKEND_DEPLOYMENT }} \
+              -n execute-techacademy \
+              -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
+
+            if [ -z "$CURRENT_IMAGE" ]; then
+              echo "No new image was built and no existing deployment found." >&2
+              echo "This should only happen on a first-ever deploy — push backend/ code first." >&2
+              exit 1
+            fi
+
+            echo "image=$CURRENT_IMAGE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply Namespace
+        run: kubectl apply -f kubernetes/namespace.yml
+
+      - name: Fetch RDS Secret ARN and Endpoint
+        id: rds
+        run: |
+          SECRET_ARN=$(aws rds describe-db-instances \
+            --db-instance-identifier rds-execute-techacademy \
+            --query 'DBInstances[0].MasterUserSecret.SecretArn' \
+            --output text)
+
+          RDS_ENDPOINT=$(aws rds describe-db-instances \
+            --db-instance-identifier rds-execute-techacademy \
+            --query 'DBInstances[0].Endpoint.Address' \
+            --output text)
+
+          echo "secret_arn=$SECRET_ARN" >> "$GITHUB_OUTPUT"
+          echo "rds_endpoint=$RDS_ENDPOINT" >> "$GITHUB_OUTPUT"
+
+      - name: Apply ClusterSecretStore
+        run: kubectl apply -f kubernetes/cluster-secret-store.yml
+
+      - name: Apply ExternalSecret
+        run: |
+          sed \
+            -e "s|<RDS_SECRET_ARN>|${{ steps.rds.outputs.secret_arn }}|g" \
+            -e "s|<RDS_ENDPOINT>|${{ steps.rds.outputs.rds_endpoint }}|g" \
+            -e "s|<RDS_DB_NAME>|execute_techacademy|g" \
+            kubernetes/secrets.yml | kubectl apply -f -
+
+      - name: Verify External Secret Synced
+        run: |
+          kubectl wait --for=condition=Ready \
+            externalsecret/execute-techacademy-db \
+            -n execute-techacademy \
+            --timeout=120s
+
+      - name: Apply Deployment
+        run: |
+          sed "s|<IMAGE_URI>|${{ steps.resolve.outputs.image }}|g" \
+            kubernetes/deployment.yml | kubectl apply -f -
+
+      - name: Apply Service
+        run: kubectl apply -f kubernetes/services.yml
+
+      - name: Wait for Rollout
+        run: |
+          kubectl rollout status \
+            deployment/${{ env.BACKEND_DEPLOYMENT }} \
+            -n execute-techacademy \
+            --timeout=5m
+
+      - name: Verify Deployment
+        run: |
+          kubectl get nodes
+          kubectl get pods -n execute-techacademy
+          kubectl get svc -n execute-techacademy
+          kubectl get deployment/${{ env.BACKEND_DEPLOYMENT }} \
+            -n execute-techacademy
+
+  # MANUAL ROLLBACK FOR BACKEND
+  rollback:
+    name: Rollback Backend EKS
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.EKS_CLUSTER }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Verify Rollback Image Exists
+        run: |
+          aws ecr describe-images \
+            --repository-name ${{ env.ECR_REPOSITORY }} \
+            --image-ids imageTag=${{ github.event.inputs.commit_sha }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Update Deployment Image
+        run: |
+          kubectl set image deployment/${{ env.BACKEND_DEPLOYMENT }} \
+            ${{ env.BACKEND_CONTAINER }}=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.event.inputs.commit_sha }} \
+            -n execute-techacademy
+
+      - name: Wait for Rollback
+        run: |
+          kubectl rollout status \
+            deployment/${{ env.BACKEND_DEPLOYMENT }} \
+            -n execute-techacademy \
+            --timeout=5m
+
+      - name: Verify Rollback
+        run: |
+          kubectl get pods -n execute-techacademy
+          kubectl get deployment/${{ env.BACKEND_DEPLOYMENT }} \
+            -n execute-techacademy
+          kubectl get svc -n execute-techacademy
