@@ -17,12 +17,16 @@ permissions:
   id-token: write
   contents: read
 
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AWS_REGION: eu-north-1
 
 jobs:
 
-  # TERRAFORM VALIDATION
+  # TERRAFORM VALIDATION (no AWS credentials needed)
   validate:
     name: Terraform Validate
     runs-on: ubuntu-latest
@@ -38,14 +42,8 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
       - name: Terraform Init
-        run: terraform init -input=false
+        run: terraform init -input=false -backend=false
 
       - name: Terraform Format
         run: terraform fmt -check -recursive
@@ -144,4 +142,4 @@ jobs:
         run: terraform apply -input=false -auto-approve tfplan
 
       - name: Terraform Output
-        run: terraform output github_actions_oidc_role_arn
+        run: terraform output

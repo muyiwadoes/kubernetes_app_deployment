@@ -524,7 +524,7 @@ resource "helm_release" "external_secrets" {
   ]
 }
 
-# AWS Load Balancer Controller
+# AWS ALB Controller
 resource "helm_release" "aws_load_balancer_controller" {
   name      = "aws-load-balancer-controller"
   namespace = "kube-system"
@@ -560,7 +560,7 @@ resource "helm_release" "aws_load_balancer_controller" {
   ]
 }
 
-# GITHUB ACTIONS OIDC
+# GITHUB ACTIONS OIDC ROLE (created by oidc-bootstrap)
 data "aws_iam_role" "github_actions" {
   name = "GitHubActionsDeployRole-${var.project_name}"
 }
@@ -572,56 +572,38 @@ resource "aws_iam_role_policy" "github_actions" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # Broad permissions needed by Terraform itself
       {
-        Effect   = "Allow"
-        Action   = ["ecr:GetAuthorizationToken"]
-        Resource = "*"
-      },
-      {
+        Sid    = "TerraformFullAccess"
         Effect = "Allow"
         Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:CompleteLayerUpload",
-          "ecr:InitiateLayerUpload",
-          "ecr:PutImage",
-          "ecr:UploadLayerPart"
-        ]
-        Resource = [
-          aws_ecr_repository.frontend.arn,
-          aws_ecr_repository.backend.arn
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ecs:DescribeServices",
-          "ecs:DescribeTaskDefinition",
-          "ecs:RegisterTaskDefinition",
-          "ecs:UpdateService"
+          "ec2:*",
+          "eks:*",
+          "ecr:*",
+          "ecs:*",
+          "elasticloadbalancing:*",
+          "rds:*",
+          "logs:*",
+          "iam:*",
+          "secretsmanager:*",
+          "kms:*",
+          "sts:GetCallerIdentity",
+          "sts:AssumeRole",
+          "sts:TagSession"
         ]
         Resource = "*"
       },
+
+      # Explicit PassRole required by ECS & EKS
       {
-        Effect   = "Allow"
-        Action   = ["eks:DescribeCluster"]
-        Resource = module.eks.cluster_arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["rds:DescribeDBInstances"]
-        Resource = "*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-        Resource = aws_db_instance.postgres.master_user_secret[0].secret_arn
-      },
-      {
+        Sid    = "PassRoles"
         Effect = "Allow"
-        Action = ["iam:PassRole"]
+        Action = "iam:PassRole"
         Resource = [
           aws_iam_role.ecs_execution.arn,
-          aws_iam_role.ecs_task.arn
+          aws_iam_role.ecs_task.arn,
+          aws_iam_role.external_secrets.arn,
+          aws_iam_role.lb_controller.arn
         ]
       }
     ]
