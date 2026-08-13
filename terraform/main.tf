@@ -472,6 +472,7 @@ module "eks" {
     workers = {
       name           = "workers"
       instance_types = [var.eks_node_instance_type]
+      kubernetes_version = var.eks_kubernetes_version
 
       min_size     = var.eks_node_count
       max_size     = var.eks_node_count
@@ -491,6 +492,7 @@ module "eks" {
 # backend-ci.yml, NOT here, to avoid Terraform's kubernetes_manifest
 # needing the CRD schema to exist at plan time (it doesn't yet, on a
 # fresh apply, since the CRD is installed by this same Helm release).
+
 resource "helm_release" "external_secrets" {
   name             = "external-secrets"
   namespace        = "external-secrets"
@@ -528,6 +530,7 @@ resource "helm_release" "external_secrets" {
   ]
 }
 
+
 # AWS ALB Controller
 resource "helm_release" "aws_load_balancer_controller" {
   name      = "aws-load-balancer-controller"
@@ -564,14 +567,54 @@ resource "helm_release" "aws_load_balancer_controller" {
   ]
 }
 
-# GITHUB ACTIONS OIDC ROLE (created by oidc-bootstrap)
-data "aws_iam_role" "github_actions" {
+# GITHUB ACTIONS OIDC ROLE
+# NOTE: this role previously existed outside Terraform state (created by
+# an "oidc-bootstrap" step) and was only referenced via a data source.
+# Its trust policy (assume_role_policy) was therefore never managed here,
+# which is why the GitHub Actions workflow was getting
+# "Not authorized to perform sts:AssumeRoleWithWebIdentity" — the trust
+# policy attached to the role in AWS did not allow the branch/ref the
+# workflow was running on (refs/heads/temp).
+#
+# It is now a first-class resource with an explicit trust policy that
+# uses StringLike + a wildcard "sub", so any ref/branch/tag on this repo
+# can assume the role. If this role already exists in AWS, import it
+# before applying:
+#   terraform import aws_iam_role.github_actions GitHubActionsDeployRole-execute-techacademy
+resource "aws_iam_role" "github_actions" {
   name = "GitHubActionsDeployRole-${var.project_name}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = "arn:aws:iam::390445022869:oidc-provider/token.actions.githubusercontent.com"
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = [
+              "repo:muyiwadoes@37314825/kubernetes_app_deployment@1304867374:*"
+            ]
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Project = var.project_name
+  }
 }
 
 resource "aws_iam_role_policy" "github_actions" {
   name = "GitHubActionsDeploy-${var.project_name}"
-  role = data.aws_iam_role.github_actions.name
+  role = aws_iam_role.github_actions.name
 
   policy = jsonencode({
     Version = "2012-10-17"

@@ -78,7 +78,7 @@ output "eks_cluster_arn" {
 # IAM
 output "github_actions_role_arn" {
   description = "GitHub Actions IAM role ARN"
-  value       = data.aws_iam_role.github_actions.arn
+  value       = aws_iam_role.github_actions.arn
 }
 
 # External Secrets IAM Role
