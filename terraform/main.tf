@@ -572,7 +572,9 @@ resource "aws_iam_role_policy" "github_actions" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # Broad permissions needed by Terraform itself
+      # Broad permissions needed by Terraform itself, plus s3/dynamodb
+      # for the remote state backend (bucket + lock table) that
+      # `terraform init` needs on every plan/apply run.
       {
         Sid    = "TerraformFullAccess"
         Effect = "Allow"
@@ -587,6 +589,8 @@ resource "aws_iam_role_policy" "github_actions" {
           "iam:*",
           "secretsmanager:*",
           "kms:*",
+          "s3:*",
+          "dynamodb:*",
           "sts:GetCallerIdentity",
           "sts:AssumeRole",
           "sts:TagSession"
