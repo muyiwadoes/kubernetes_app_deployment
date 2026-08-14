@@ -5,5 +5,6 @@ terraform {
     region         = "eu-north-1"
     dynamodb_table = "execute-techacademy-tflock"
     encrypt        = true
+    use_lockfile   = true
   }
 }

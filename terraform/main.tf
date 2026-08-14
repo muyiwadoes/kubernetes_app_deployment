@@ -454,7 +454,6 @@ resource "aws_ecs_service" "frontend" {
     Service = "frontend"
   }
 }
-
 # EKS
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
@@ -469,8 +468,36 @@ module "eks" {
   endpoint_public_access  = true
   endpoint_private_access = false
 
-  enable_cluster_creator_admin_permissions = true
+  # Do not automatically grant the identity running Terraform admin access.
+  # GitHub Actions role is explicitly managed through access_entries below.
+  enable_cluster_creator_admin_permissions = false
   enable_irsa                              = true
+
+  # Keep the KMS administrator stable regardless of whether Terraform
+  # is executed locally or through GitHub Actions.
+  kms_key_administrators = [
+    data.aws_iam_role.github_actions.arn
+  ]
+
+  # Explicitly manage the GitHub Actions role as an EKS administrator.
+  # The keys intentionally match the existing Terraform state addresses:
+  # module.eks.aws_eks_access_entry.this["cluster_creator"]
+  # module.eks.aws_eks_access_policy_association.this["cluster_creator_admin"]
+  access_entries = {
+    cluster_creator = {
+      principal_arn = data.aws_iam_role.github_actions.arn
+
+      policy_associations = {
+        cluster_creator_admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  }
 
   addons = {
     coredns = {
@@ -571,6 +598,14 @@ resource "helm_release" "aws_load_balancer_controller" {
     {
       name  = "clusterName"
       value = module.eks.cluster_name
+    },
+    {
+      name  = "region"
+      value = var.aws_region
+    },
+    {
+      name  = "vpcId"
+      value = module.vpc.vpc_id
     },
     {
       name  = "serviceAccount.create"
