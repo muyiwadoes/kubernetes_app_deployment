@@ -141,7 +141,7 @@ jobs:
         run: gunzip -c image.tar.gz | docker load
 
       - name: Scan Image
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: backend-execute-techacademy:${{ github.sha }}
           severity: HIGH,CRITICAL
