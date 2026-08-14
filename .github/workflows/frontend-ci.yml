@@ -20,6 +20,7 @@ on:
   workflow_run:
     workflows: ["Terraform Infrastructure"]
     types: [completed]
+    branches: [main, temp]
 
   workflow_dispatch:
     inputs:
@@ -46,10 +47,14 @@ jobs:
   lint:
     name: Lint Frontend
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
 
-      - uses: actions/setup-node@v4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
@@ -67,8 +72,10 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-latest
     needs: lint
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -83,6 +90,12 @@ jobs:
             --names alb-execute-techacademy \
             --query 'LoadBalancers[0].DNSName' \
             --output text)
+
+          if [ -z "$DNS" ] || [ "$DNS" = "None" ]; then
+            echo "ALB DNS name could not be retrieved." >&2
+            exit 1
+          fi
+
           echo "url=http://$DNS" >> "$GITHUB_OUTPUT"
 
       - name: Build Image
@@ -94,19 +107,23 @@ jobs:
 
       - name: Save Image
         run: |
-          docker save frontend-execute-techacademy:${{ github.sha }}
+          docker save frontend-execute-techacademy:${{ github.sha }} | gzip > image.tar.gz
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload Image Artifact
+        uses: actions/upload-artifact@v4
         with:
           name: frontend-image
           path: image.tar.gz
+          if-no-files-found: error
 
   trivy:
     name: Trivy Image Scan
     runs-on: ubuntu-latest
     needs: build
+
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download Image Artifact
+        uses: actions/download-artifact@v4
         with:
           name: frontend-image
 
@@ -114,7 +131,8 @@ jobs:
         run: |
           gunzip -c image.tar.gz | docker load
 
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - name: Scan Image
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: frontend-execute-techacademy:${{ github.sha }}
           severity: HIGH,CRITICAL
@@ -126,9 +144,17 @@ jobs:
     name: Push to ECR and Deploy to ECS
     runs-on: ubuntu-latest
     needs: trivy
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/temp'
+
+    if: |
+      github.event_name != 'pull_request' &&
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/temp'
+      )
+
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download Image Artifact
+        uses: actions/download-artifact@v4
         with:
           name: frontend-image
 
@@ -136,18 +162,21 @@ jobs:
         run: |
           gunzip -c image.tar.gz | docker load
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - id: login-ecr
+      - name: Login to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       # Tag with commit SHA and push
       - name: Tag and Push Image
         run: |
-          docker tag frontend-execute-techacademy:${{ github.sha }} \
+          docker tag \
+            frontend-execute-techacademy:${{ github.sha }} \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
           docker push \
@@ -160,11 +189,19 @@ jobs:
             --task-definition ${{ env.ECS_FRONTEND_TASK_FAMILY }} \
             --query taskDefinition \
             --output json |
-            jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
-            > task-definition.json
+            jq 'del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+            )' > task-definition.json
 
       # Render new task definition with updated image
-      - id: render-task-def
+      - name: Render Task Definition
+        id: render-task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition.json
@@ -195,13 +232,16 @@ jobs:
     name: Rollback Frontend ECS
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
+
     steps:
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - id: login-ecr
+      - name: Login to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Download Current Task Definition
@@ -210,10 +250,18 @@ jobs:
             --task-definition ${{ env.ECS_FRONTEND_TASK_FAMILY }} \
             --query taskDefinition \
             --output json |
-            jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
-            > task-definition.json
+            jq 'del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+            )' > task-definition.json
 
-      - id: render-task-def
+      - name: Render Rollback Task Definition
+        id: render-task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition.json
