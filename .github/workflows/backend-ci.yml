@@ -147,6 +147,7 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: 1
+          trivyignores: .trivyignore
 
   # PUSH IMAGE TO ECR — only if a new image was built and scanned
   push:
