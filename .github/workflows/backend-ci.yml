@@ -265,34 +265,40 @@ jobs:
             echo "image=$CURRENT_IMAGE" >> "$GITHUB_OUTPUT"
           fi
 
+      # Terraform creates the RDS instance and its master-user secret, but
+      # deliberately does NOT apply ClusterSecretStore/ExternalSecret (see
+      # comment in main.tf — their CRDs don't exist at Terraform plan time).
+      # Pull the connection info straight from AWS using the Project tag
+      # Terraform already stamps on the instance, so this job doesn't need
+      # Terraform state access.
+      - name: Resolve RDS Connection Info
+        id: rds
+        run: |
+          RDS_JSON=$(aws rds describe-db-instances \
+            --query "DBInstances[?TagList[?Key=='Project' && Value=='execute-techacademy']] | [0]" \
+            --output json)
+
+          if [ "$RDS_JSON" = "null" ] || [ -z "$RDS_JSON" ]; then
+            echo "Could not find an RDS instance tagged Project=execute-techacademy" >&2
+            exit 1
+          fi
+
+          echo "endpoint=$(echo "$RDS_JSON" | jq -r '.Endpoint.Address')" >> "$GITHUB_OUTPUT"
+          echo "dbname=$(echo "$RDS_JSON" | jq -r '.DBName')" >> "$GITHUB_OUTPUT"
+          echo "secret_arn=$(echo "$RDS_JSON" | jq -r '.MasterUserSecret.SecretArn')" >> "$GITHUB_OUTPUT"
+
       - name: Apply Namespace
         run: kubectl apply -f kubernetes/namespace.yml
 
-      - name: Fetch RDS Secret ARN and Endpoint
-        id: rds
-        run: |
-          SECRET_ARN=$(aws rds describe-db-instances \
-            --db-instance-identifier rds-execute-techacademy \
-            --query 'DBInstances[0].MasterUserSecret.SecretArn' \
-            --output text)
-
-          RDS_ENDPOINT=$(aws rds describe-db-instances \
-            --db-instance-identifier rds-execute-techacademy \
-            --query 'DBInstances[0].Endpoint.Address' \
-            --output text)
-
-          echo "secret_arn=$SECRET_ARN" >> "$GITHUB_OUTPUT"
-          echo "rds_endpoint=$RDS_ENDPOINT" >> "$GITHUB_OUTPUT"
-
-      - name: Apply ClusterSecretStore
+      - name: Apply Cluster Secret Store
         run: kubectl apply -f kubernetes/cluster-secret-store.yml
 
-      - name: Apply ExternalSecret
+      - name: Apply External Secret
         run: |
           sed \
+            -e "s|<RDS_ENDPOINT>|${{ steps.rds.outputs.endpoint }}|g" \
+            -e "s|<RDS_DB_NAME>|${{ steps.rds.outputs.dbname }}|g" \
             -e "s|<RDS_SECRET_ARN>|${{ steps.rds.outputs.secret_arn }}|g" \
-            -e "s|<RDS_ENDPOINT>|${{ steps.rds.outputs.rds_endpoint }}|g" \
-            -e "s|<RDS_DB_NAME>|execute_techacademy|g" \
             kubernetes/secrets.yml | kubectl apply -f -
 
       - name: Verify External Secret Synced
