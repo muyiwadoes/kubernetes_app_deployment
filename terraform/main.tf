@@ -742,7 +742,7 @@ resource "aws_iam_role_policy" "github_actions" {
         Resource = "arn:aws:s3:::execute-techacademy-tfstate"
       },
 
-      # Terraform remote state - state object access
+      # Terraform remote state - state object access (state file + native S3 lock file)
       {
         Sid    = "TerraformStateObjects"
         Effect = "Allow"
@@ -753,10 +753,13 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:DeleteObject"
         ]
 
-        Resource = "arn:aws:s3:::execute-techacademy-tfstate/execute-techacademy/terraform.tfstate"
+        Resource = [
+          "arn:aws:s3:::execute-techacademy-tfstate/execute-techacademy/terraform.tfstate",
+          "arn:aws:s3:::execute-techacademy-tfstate/execute-techacademy/terraform.tfstate.tflock"
+        ]
       },
 
-      # Terraform state locking
+      # Terraform state locking (DynamoDB)
       {
         Sid    = "TerraformStateLock"
         Effect = "Allow"
