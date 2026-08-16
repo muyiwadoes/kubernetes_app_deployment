@@ -1,0 +1,79 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "TerraformInfrastructure",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:*",
+        "eks:*",
+        "ecr:*",
+        "ecs:*",
+        "elasticloadbalancing:*",
+        "rds:*",
+        "logs:*",
+        "iam:*",
+        "secretsmanager:*",
+        "kms:*",
+        "sts:GetCallerIdentity",
+        "sts:AssumeRole",
+        "sts:TagSession"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SSMReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters"
+      ],
+      "Resource": "arn:aws:ssm:*::parameter/aws/service/eks/*"
+    },
+    {
+      "Sid": "TerraformStateBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketVersioning",
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::execute-techacademy-tfstate"
+    },
+    {
+      "Sid": "TerraformStateObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::execute-techacademy-tfstate/execute-techacademy/terraform.tfstate",
+        "arn:aws:s3:::execute-techacademy-tfstate/execute-techacademy/terraform.tfstate.tflock"
+      ]
+    },
+    {
+      "Sid": "TerraformStateLock",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": "arn:aws:dynamodb:eu-north-1:390445022869:table/execute-techacademy-tflock"
+    },
+    {
+      "Sid": "PassRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::390445022869:role/ECSExecutionRole-execute-techacademy",
+        "arn:aws:iam::390445022869:role/ECSTaskRole-execute-techacademy",
+        "arn:aws:iam::390445022869:role/ExternalSecretsRole-execute-techacademy",
+        "arn:aws:iam::390445022869:role/AWSLoadBalancerControllerRole-execute-techacademy"
+      ]
+    }
+  ]
+}

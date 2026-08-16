@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execute-techacademy
+  namespace: execute-techacademy
+  labels:
+    app: execute-techacademy
+
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: execute-techacademy
+
+  template:
+    metadata:
+      labels:
+        app: execute-techacademy
+
+    spec:
+      containers:
+        - name: execute-techacademy
+          image: "<IMAGE_URI>"
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: execute-techacademy-db
+                  key: DB_HOST
+
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: execute-techacademy-db
+                  key: DB_NAME
+
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: execute-techacademy-db
+                  key: DB_USER
+
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: execute-techacademy-db
+                  key: DB_PASSWORD
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"

@@ -1,0 +1,43 @@
+# Git
+.git
+
+# Node
+frontend/node_modules/
+frontend/build/
+frontend/.env.local
+frontend/.env.*.local
+
+# Environment files
+*.env
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+plan.txt
+crash.log
+crash.*.log
+
+# IDE
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Operating System
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# # Docker artifacts
+*.tar
+*.tar.gz
